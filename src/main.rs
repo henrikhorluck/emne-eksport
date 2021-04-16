@@ -216,21 +216,24 @@ pub async fn main() -> Result<(), anyhow::Error> {
             ok
         }
     }));
-    let server = Server::bind(&([127, 0, 0, 1], port).into()).serve(make_servce);
+    let thread_handler = tokio::spawn(async move {
+        let server = Server::bind(&([127, 0, 0, 1], port).into()).serve(make_servce);
+        // Prepare some signal for when the server should start shutting down...
+        let graceful = server.with_graceful_shutdown(async {
+            rx.await.ok();
+        });
 
-    // Prepare some signal for when the server should start shutting down...
-    let graceful = server.with_graceful_shutdown(async {
-        rx.await.ok();
+        // Await the `server` receiving the signal...
+        if let Err(e) = graceful.await {
+            eprintln!("server error: {}", e);
+        }
     });
 
-    // Await the `server` receiving the signal...
-    if let Err(e) = graceful.await {
-        eprintln!("server error: {}", e);
-    }
-
     // And later, trigger the signal by calling `tx.send(())`.
-    let code = code_rx.recv_timeout(Duration::from_secs(1)).unwrap();
-    let state = state_rx.recv_timeout(Duration::from_secs(1)).unwrap();
+    let code = code_rx
+        .recv_timeout(Duration::from_secs(60))
+        .expect("Didn't log in in time");
+    let state = state_rx.recv().unwrap();
     debug!("Feide returned the following code:\n{}\n", code.secret());
     debug!(
         "Feide returned the following state:\n{} (expected `{}`)\n",
@@ -316,5 +319,6 @@ pub async fn main() -> Result<(), anyhow::Error> {
         fs::write(format!("{}/{}.pdf", folder_path, emne_kode), pdf)?;
     }
 
+    thread_handler.await?;
     Ok(())
 }
