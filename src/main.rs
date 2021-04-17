@@ -280,11 +280,16 @@ pub async fn main() -> Result<(), anyhow::Error> {
     for emne in emner.iter().filter(|e| e.emne_type == "fc:fs:emne") {
         let emne_kode = emne.id.split(':').nth(5).unwrap();
         let year = if let Some(not_after) = emne.membership.not_after {
-            not_after.year()
+            // not_after is set to ~14. August if it is spring, and 12. December if autumn
+            if not_after.month() > Month::September as u32 {
+                not_after.year()
+            } else {
+                not_after.year() - 1
+            }
         } else {
             // current year
             let now = Utc::now();
-            if now.month() >= Month::August as u32 {
+            if now.month() > Month::August as u32 {
                 now.year()
             } else {
                 now.year() - 1
@@ -304,7 +309,7 @@ pub async fn main() -> Result<(), anyhow::Error> {
             .print_to_pdf(None)
             .map_err(|e| e.compat())?;
 
-        /* // TODO: This fails for some reason?
+        /*
         let title = tab
             .find_element("#course-details > h1:first-type-of")
             .map_err(|e| e.compat())?
