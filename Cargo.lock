@@ -494,8 +494,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c9495705279e7140bf035dde1f6e750c162df8b625267cd52cc44e0b156732c8"
 dependencies = [
  "cfg-if",
+ "js-sys",
  "libc",
  "wasi 0.10.2+wasi-snapshot-preview1",
+ "wasm-bindgen",
 ]
 
 [[package]]
@@ -919,14 +921,15 @@ dependencies = [
 
 [[package]]
 name = "oauth2"
-version = "4.0.0"
+version = "4.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "10ad4d0136960353683efa6160b9c867088b4b8f567b762cd37420a10ce32703"
+checksum = "80e47cfc4c0a1a519d9a025ebfbac3a2439d1b5cdf397d72dcb79b11d9920dab"
 dependencies = [
- "base64 0.12.3",
+ "base64 0.13.0",
  "chrono",
+ "getrandom 0.2.2",
  "http",
- "rand 0.7.3",
+ "rand 0.8.3",
  "reqwest",
  "serde",
  "serde_json",
@@ -956,9 +959,9 @@ checksum = "624a8340c38c1b80fd549087862da4ba43e08858af025b236e509b6649fc13d5"
 
 [[package]]
 name = "openidconnect"
-version = "2.0.2"
+version = "2.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "778c7158e7e2cb78c4f8236f2a329e26c411666923f3cb6b8a10ba527935a200"
+checksum = "a42ff51db0f23ae55dd6f234a15ed7bb468bc97938670693a3eaa42869110167"
 dependencies = [
  "base64 0.12.3",
  "chrono",
