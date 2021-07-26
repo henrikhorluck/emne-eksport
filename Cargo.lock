@@ -297,7 +297,7 @@ dependencies = [
  "env_logger 0.9.0",
  "headless_chrome",
  "http",
- "hyper 0.14.10",
+ "hyper 0.14.11",
  "log 0.4.14",
  "openidconnect",
  "reqwest",
@@ -632,9 +632,9 @@ dependencies = [
 
 [[package]]
 name = "hyper"
-version = "0.14.10"
+version = "0.14.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7728a72c4c7d72665fde02204bcbd93b247721025b222ef78606f14513e0fd03"
+checksum = "0b61cf2d1aebcf6e6352c97b81dc2244ca29194be1b276f5d8ad5c6330fffb11"
 dependencies = [
  "bytes",
  "futures-channel",
@@ -661,7 +661,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5f9f7a97316d44c0af9b0301e65010573a853a9fc97046d7331d7f6bc0fd5a64"
 dependencies = [
  "futures-util",
- "hyper 0.14.10",
+ "hyper 0.14.11",
  "log 0.4.14",
  "rustls",
  "tokio",
@@ -676,7 +676,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d6183ddfa99b85da61a140bea0efc93fdf56ceaa041b37d553518030827f9905"
 dependencies = [
  "bytes",
- "hyper 0.14.10",
+ "hyper 0.14.11",
  "native-tls",
  "tokio",
  "tokio-native-tls",
@@ -1402,7 +1402,7 @@ dependencies = [
  "futures-util",
  "http",
  "http-body",
- "hyper 0.14.10",
+ "hyper 0.14.11",
  "hyper-rustls",
  "hyper-tls",
  "ipnet",
