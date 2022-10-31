@@ -5,7 +5,7 @@ use anyhow::anyhow;
 use chrono::prelude::*;
 use chrono::DateTime;
 use clap::{Arg, Command};
-use headless_chrome::Browser;
+use fantoccini::wd::WebDriverCompatibleCommand;
 use http::{Request, Response, StatusCode};
 use hyper::service::service_fn;
 use hyper::{Body, Server};
@@ -65,7 +65,8 @@ async fn parse_request(
     if redirect_url.path() != "/" {
         return Err(ParseError::Invalid(anyhow!("Not Found")));
     }
-    let url = Url::parse(&("http://localhost".to_string() + &redirect_url.to_string())).unwrap();
+    // FIXME: what is happening here
+    let url = Url::parse(&format!("http://localhost{redirect_url}")).unwrap();
 
     let code_pair = url
         .query_pairs()
@@ -278,9 +279,22 @@ pub async fn main() -> Result<(), anyhow::Error> {
         .json()
         .await?;
 
-    let browser = Browser::default().map_err(|e| e.compat())?;
+    let mut c = fantoccini::ClientBuilder::native();
+    c.capabilities(serde_json::Map::from_iter(
+        [(
+            "goog:chromeOptions".to_string(),
+            serde_json::json!({
+                    "args": ["--headless"],
+            }),
+        )]
+        .into_iter(),
+    ));
 
-    let tab = browser.wait_for_initial_tab().map_err(|e| e.compat())?;
+    let browser = c
+        .connect("http://localhost:4444")
+        .await
+        .expect("failed to connect to WebDriver");
+
     fs::create_dir(folder_path)?;
 
     for emne in emner.iter().filter(|e| e.emne_type == "fc:fs:emne") {
@@ -307,13 +321,9 @@ pub async fn main() -> Result<(), anyhow::Error> {
             year = year
         );
 
-        let pdf = tab
-            .navigate_to(&uri)
-            .map_err(|e| e.compat())?
-            .wait_until_navigated()
-            .map_err(|e| e.compat())?
-            .print_to_pdf(None)
-            .map_err(|e| e.compat())?;
+        browser.goto(&uri).await?;
+        let data = browser.issue_cmd(ScreenShotCommand {}).await?;
+        let pdf = base64::decode(data.as_str().unwrap())?;
 
         /*
         let title = tab
@@ -334,7 +344,61 @@ pub async fn main() -> Result<(), anyhow::Error> {
     Ok(())
 }
 
-#[test]
-fn verify_cli() {
-    cli().debug_assert();
+// Could inline https://github.com/atroche/rust-headless-chrome/blob/61ce783806e5d75a03f731330edae6156bb0a2e0/src/types.rs#L78
+// but not that much point in it
+#[derive(Debug)]
+struct ScreenShotCommand {}
+
+impl WebDriverCompatibleCommand for ScreenShotCommand {
+    /// See <https://w3c.github.io/webdriver/#print-page>
+    fn endpoint(
+        &self,
+        base_url: &url::Url,
+        session_id: std::option::Option<&str>,
+    ) -> Result<url::Url, url::ParseError> {
+        let base = { base_url.join(&format!("session/{}/", session_id.as_ref().unwrap()))? };
+        base.join("print")
+    }
+    fn method_and_body(&self, _request_url: &url::Url) -> (http::Method, Option<String>) {
+        // needs to be empty json object, not None
+        (http::Method::POST, Some("{}".to_string()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn verify_cli() {
+        cli().debug_assert();
+    }
+
+    #[tokio::test]
+    async fn test_print_pdf() -> Result<(), anyhow::Error> {
+        let mut c = fantoccini::ClientBuilder::native();
+        c.capabilities(serde_json::Map::from_iter(std::iter::once((
+            "goog:chromeOptions".to_string(),
+            serde_json::json!({
+                    "args": ["--headless"],
+            }),
+        ))));
+        let browser = c
+            .connect("http://localhost:4444")
+            .await
+            .expect("failed to connect to WebDriver");
+
+        browser
+            .goto("https://www.ntnu.no/studier/emner/TDT4120")
+            .await?;
+        let data = browser.issue_cmd(ScreenShotCommand {}).await?;
+        let str = data.as_str().unwrap();
+        let pdf = base64::decode(str)?;
+
+        fs::write("test.pdf", pdf)?;
+        browser.close().await?;
+
+        Result::Ok(())
+        // Page.printToPDF
+    }
 }
