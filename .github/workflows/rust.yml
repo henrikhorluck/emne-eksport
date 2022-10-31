@@ -36,7 +36,7 @@ jobs:
         if: ${{ matrix.driver == 'firefox' }}
 
       - name: Start edge
-        run: $EDGEWEBDRIVER/edgedriver --port=4444 &
+        run: $EDGEWEBDRIVER/msedgedriver --port=4444 &
         shell: bash
         if: ${{ matrix.driver == 'edge' }}
 
