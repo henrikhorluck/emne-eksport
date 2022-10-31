@@ -1,4 +1,5 @@
 #![deny(rust_2018_idioms)]
+#![allow(dead_code)]
 
 use anyhow::anyhow;
 use chrono::prelude::*;
@@ -95,17 +96,15 @@ async fn parse_request(
     ))
 }
 
-#[tokio::main]
-pub async fn main() -> Result<(), anyhow::Error> {
-    env_logger::init();
-    let config = App::new("emne-eksport")
+fn app() -> clap::App<'static> {
+    App::new("emne-eksport")
         .version("0.1")
         .about("Eksporter emnebeskrivelser fra utdanning ved NTNU")
         .author("Henrik Hørlück Berg <henrik@horluck.no")
         .arg(
             Arg::with_name("destination")
                 .help("Name of the folder to put the exported PDFs")
-                .short("d")
+                .short('d')
                 .takes_value(true)
                 .required(true),
         )
@@ -122,10 +121,15 @@ pub async fn main() -> Result<(), anyhow::Error> {
         .arg(Arg::with_name("redirect-port")
             .help("Port of the redircetio URL, which you configured in https://dashboard.dataporten.no. Default value 16453")
             .default_value("16453")
-            .short("p")
+            .short('p')
             .takes_value(true)
         )
-        .get_matches();
+}
+
+#[tokio::main]
+pub async fn main() -> Result<(), anyhow::Error> {
+    env_logger::init();
+    let config = app().get_matches();
     let folder_path = config.value_of("destination").unwrap();
 
     let feide_client_id = ClientId::new(
@@ -275,7 +279,7 @@ pub async fn main() -> Result<(), anyhow::Error> {
     let browser = Browser::default().map_err(|e| e.compat())?;
 
     let tab = browser.wait_for_initial_tab().map_err(|e| e.compat())?;
-    fs::create_dir(folder_path.to_string())?;
+    fs::create_dir(folder_path)?;
 
     for emne in emner.iter().filter(|e| e.emne_type == "fc:fs:emne") {
         let emne_kode = emne.id.split(':').nth(5).unwrap();
@@ -327,3 +331,10 @@ pub async fn main() -> Result<(), anyhow::Error> {
     thread_handler.await?;
     Ok(())
 }
+
+
+#[test]
+fn verify_app() {
+    app().debug_assert();
+}
+
