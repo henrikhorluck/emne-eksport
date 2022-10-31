@@ -4,7 +4,7 @@
 use anyhow::anyhow;
 use chrono::prelude::*;
 use chrono::DateTime;
-use clap::{App, Arg};
+use clap::{Arg, Command};
 use headless_chrome::Browser;
 use http::{Request, Response, StatusCode};
 use hyper::service::service_fn;
@@ -96,55 +96,57 @@ async fn parse_request(
     ))
 }
 
-fn app() -> clap::App<'static> {
-    App::new("emne-eksport")
+fn cli() -> clap::Command {
+    Command::new("emne-eksport")
         .version("0.1")
         .about("Eksporter emnebeskrivelser fra utdanning ved NTNU")
-        .author("Henrik Hørlück Berg <henrik@horluck.no")
         .arg(
-            Arg::with_name("destination")
+            Arg::new("destination")
                 .help("Name of the folder to put the exported PDFs")
                 .short('d')
-                .takes_value(true)
                 .required(true),
         )
         .arg(
-            Arg::with_name("client_id")
+            Arg::new("client_id")
                 .help("OIDC Client ID, can be retrieved from https://dashboard.dataporten.no/. Alternatively set through the `FEIDE_CLIENT_ID` environment variable")
-                .takes_value(true),
         )
         .arg(
-            Arg::with_name("client_secret")
+            Arg::new("client_secret")
                 .help("OIDC Client Secret, can be retrieved from https://dashboard.dataporten.no/ Alternatively set through the `FEIDE_CLIENT_SECRET` environment variable")
-                .takes_value(true),
         )
-        .arg(Arg::with_name("redirect-port")
+        .arg(Arg::new("redirect-port")
             .help("Port of the redircetio URL, which you configured in https://dashboard.dataporten.no. Default value 16453")
             .default_value("16453")
             .short('p')
-            .takes_value(true)
         )
 }
 
 #[tokio::main]
 pub async fn main() -> Result<(), anyhow::Error> {
     env_logger::init();
-    let config = app().get_matches();
-    let folder_path = config.value_of("destination").unwrap();
+    let config = cli().get_matches();
+    let folder_path = config
+        .get_one::<String>("destination")
+        .map(|s| s.as_str())
+        .unwrap();
 
     let feide_client_id = ClientId::new(
         config
-            .value_of("client_id")
+            .get_one::<String>("client_id")
             .map(|s| s.to_string())
             .unwrap_or_else(|| env::var("FEIDE_CLIENT_ID").expect("Could not find ClientId")),
     );
     let feide_client_secret = ClientSecret::new(
         config
-            .value_of("client_secret")
+            .get_one::<String>("client_secret")
             .map(|s| s.to_string())
             .unwrap_or_else(|| env::var("FEIDE_CLIENT_SECRET").expect("Could not find ClientId")),
     );
-    let port: u16 = config.value_of("redirect-port").unwrap().parse()?;
+    let port: u16 = config
+        .get_one::<String>("redirect-port")
+        .map(|s| s.to_string())
+        .unwrap()
+        .parse()?;
 
     let provider_metadata = CoreProviderMetadata::discover_async(
         IssuerUrl::new("https://auth.dataporten.no".to_string())?,
@@ -332,9 +334,7 @@ pub async fn main() -> Result<(), anyhow::Error> {
     Ok(())
 }
 
-
 #[test]
-fn verify_app() {
-    app().debug_assert();
+fn verify_cli() {
+    cli().debug_assert();
 }
-
