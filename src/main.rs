@@ -281,12 +281,26 @@ pub async fn main() -> Result<(), anyhow::Error> {
 
     let mut c = fantoccini::ClientBuilder::native();
     c.capabilities(serde_json::Map::from_iter(
-        [(
-            "goog:chromeOptions".to_string(),
-            serde_json::json!({
-                    "args": ["--headless"],
-            }),
-        )]
+        [
+            (
+                "goog:chromeOptions".to_string(),
+                serde_json::json!({
+                        "args": ["--headless"],
+                }),
+            ),
+            (
+                "ms:edgeOptions".to_string(),
+                serde_json::json!({
+                        "args": ["--headless"],
+                }),
+            ),
+            (
+                "moz:firefoxOptions".to_string(),
+                serde_json::json!({
+                        "args": ["--headless"],
+                }),
+            ),
+        ]
         .into_iter(),
     ));
 
@@ -377,12 +391,29 @@ mod tests {
     #[tokio::test]
     async fn test_print_pdf() -> Result<(), anyhow::Error> {
         let mut c = fantoccini::ClientBuilder::native();
-        c.capabilities(serde_json::Map::from_iter(std::iter::once((
-            "goog:chromeOptions".to_string(),
-            serde_json::json!({
-                    "args": ["--headless"],
-            }),
-        ))));
+        c.capabilities(serde_json::Map::from_iter(
+            [
+                (
+                    "goog:chromeOptions".to_string(),
+                    serde_json::json!({
+                            "args": ["--headless"],
+                    }),
+                ),
+                (
+                    "ms:edgeOptions".to_string(),
+                    serde_json::json!({
+                            "args": ["--headless"],
+                    }),
+                ),
+                (
+                    "moz:firefoxOptions".to_string(),
+                    serde_json::json!({
+                            "args": ["--headless"],
+                    }),
+                ),
+            ]
+            .into_iter(),
+        ));
         let browser = c
             .connect("http://localhost:4444")
             .await
