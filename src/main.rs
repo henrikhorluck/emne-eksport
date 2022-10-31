@@ -116,7 +116,7 @@ fn cli() -> clap::Command {
                 .help("OIDC Client Secret, can be retrieved from https://dashboard.dataporten.no/ Alternatively set through the `FEIDE_CLIENT_SECRET` environment variable")
         )
         .arg(Arg::new("redirect-port")
-            .help("Port of the redircetio URL, which you configured in https://dashboard.dataporten.no. Default value 16453")
+            .help("Port of the redirection-URL, which you configured in https://dashboard.dataporten.no")
             .default_value("16453")
             .short('p')
         )
