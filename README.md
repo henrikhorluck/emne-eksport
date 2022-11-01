@@ -13,8 +13,8 @@ Eksporter emnebeskrivelser fra utdanning ved NTNU
 Usage: emne-eksport [OPTIONS] -d <destination> [client_id] [client_secret]
 
 Arguments:
-  [client_id]      OIDC Client ID, can be retrieved from https://dashboard.dataporten.no/. Alternatively set through the `FEIDE_CLIENT_ID` environment variable
-  [client_secret]  OIDC Client Secret, can be retrieved from https://dashboard.dataporten.no/ Alternatively set through the `FEIDE_CLIENT_SECRET` environment variable
+  [client_id]      OIDC Client ID, can be retrieved from https://dashboard.dataporten.no [env: FEIDE_CLIENT_ID=]
+  [client_secret]  OIDC Client Secret, can be retrieved from https://dashboard.dataporten.no [env: FEIDE_CLIENT_SECRET=]
 
 Options:
   -d <destination>        Name of the folder to put the exported PDFs
@@ -22,3 +22,4 @@ Options:
   -h, --help              Print help information
   -V, --version           Print version information
 ```
+

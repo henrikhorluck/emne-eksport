@@ -5,7 +5,7 @@ use anyhow::anyhow;
 use chrono::prelude::*;
 use chrono::DateTime;
 use clap::{Arg, Command};
-use fantoccini::wd::WebDriverCompatibleCommand;
+use fantoccini::wd::{Capabilities, WebDriverCompatibleCommand};
 use http::{Request, Response, StatusCode};
 use hyper::service::service_fn;
 use hyper::{Body, Server};
@@ -19,7 +19,6 @@ use openidconnect::{
 };
 use serde::Deserialize;
 use std::convert::Infallible;
-use std::env;
 use std::fs;
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
@@ -28,6 +27,8 @@ use thiserror::Error;
 use tokio::sync::oneshot;
 use tower::make::Shared;
 use url::Url;
+
+const WEB_DRIVER_CAPABILITIES: &str = include_str!("WebDriverCapabilities.json");
 
 #[derive(Debug, Deserialize)]
 struct Emne {
@@ -109,11 +110,13 @@ fn cli() -> clap::Command {
         )
         .arg(
             Arg::new("client_id")
-                .help("OIDC Client ID, can be retrieved from https://dashboard.dataporten.no/. Alternatively set through the `FEIDE_CLIENT_ID` environment variable")
+                .help("OIDC Client ID, can be retrieved from https://dashboard.dataporten.no")
+                .env("FEIDE_CLIENT_ID")
         )
         .arg(
             Arg::new("client_secret")
-                .help("OIDC Client Secret, can be retrieved from https://dashboard.dataporten.no/ Alternatively set through the `FEIDE_CLIENT_SECRET` environment variable")
+                .help("OIDC Client Secret, can be retrieved from https://dashboard.dataporten.no")
+                .env("FEIDE_CLIENT_SECRET")
         )
         .arg(Arg::new("redirect-port")
             .help("Port of the redirection-URL, which you configured in https://dashboard.dataporten.no")
@@ -126,28 +129,16 @@ fn cli() -> clap::Command {
 pub async fn main() -> Result<(), anyhow::Error> {
     env_logger::init();
     let config = cli().get_matches();
-    let folder_path = config
-        .get_one::<String>("destination")
-        .map(|s| s.as_str())
-        .unwrap();
+    let folder_path = config.get_one::<String>("destination").unwrap();
 
-    let feide_client_id = ClientId::new(
-        config
-            .get_one::<String>("client_id")
-            .map(|s| s.to_string())
-            .unwrap_or_else(|| env::var("FEIDE_CLIENT_ID").expect("Could not find ClientId")),
-    );
+    let feide_client_id = ClientId::new(config.get_one::<String>("client_id").unwrap().to_string());
     let feide_client_secret = ClientSecret::new(
         config
             .get_one::<String>("client_secret")
-            .map(|s| s.to_string())
-            .unwrap_or_else(|| env::var("FEIDE_CLIENT_SECRET").expect("Could not find ClientId")),
+            .unwrap()
+            .to_string(),
     );
-    let port: u16 = config
-        .get_one::<String>("redirect-port")
-        .map(|s| s.to_string())
-        .unwrap()
-        .parse()?;
+    let port: u16 = *config.get_one::<u16>("redirect-port").unwrap();
 
     let provider_metadata = CoreProviderMetadata::discover_async(
         IssuerUrl::new("https://auth.dataporten.no".to_string())?,
@@ -160,9 +151,7 @@ pub async fn main() -> Result<(), anyhow::Error> {
         feide_client_id,
         Some(feide_client_secret),
     )
-    .set_redirect_uri(
-        RedirectUrl::new(format!("http://localhost:{}", port)).expect("Invalid redirect URL"),
-    );
+    .set_redirect_uri(RedirectUrl::new(format!("http://localhost:{}", port))?);
 
     let (pkce_challenge, pkce_verifier) = PkceCodeChallenge::new_random_sha256();
     let (authorize_url, csrf_state, nonce) = client
@@ -280,29 +269,9 @@ pub async fn main() -> Result<(), anyhow::Error> {
         .await?;
 
     let mut c = fantoccini::ClientBuilder::native();
-    c.capabilities(serde_json::Map::from_iter(
-        [
-            (
-                "goog:chromeOptions".to_string(),
-                serde_json::json!({
-                        "args": ["--headless"],
-                }),
-            ),
-            (
-                "ms:edgeOptions".to_string(),
-                serde_json::json!({
-                        "args": ["--headless"],
-                }),
-            ),
-            (
-                "moz:firefoxOptions".to_string(),
-                serde_json::json!({
-                        "args": ["--headless"],
-                }),
-            ),
-        ]
-        .into_iter(),
-    ));
+    c.capabilities(serde_json::from_str::<Capabilities>(
+        WEB_DRIVER_CAPABILITIES,
+    )?);
 
     let browser = c
         .connect("http://localhost:4444")
@@ -336,21 +305,9 @@ pub async fn main() -> Result<(), anyhow::Error> {
         );
 
         browser.goto(&uri).await?;
-        let data = browser.issue_cmd(ScreenShotCommand {}).await?;
+        let data = browser.issue_cmd(PrintCommand {}).await?;
         let pdf = base64::decode(data.as_str().unwrap())?;
 
-        /*
-        let title = tab
-            .find_element("#course-details > h1:first-type-of")
-            .map_err(|e| e.compat())?
-            .get_attributes()
-            .map_err(|e| e.compat())?
-            .ok_or(anyhow!("Emne-hedaer hadde ikke atributter"))?;
-
-        let english_name = title
-            .get("textValue")
-            .ok_or(anyhow!("Emne har ikke tittel"))?;
-        */
         fs::write(format!("{}/{}.pdf", folder_path, emne_kode), pdf)?;
     }
 
@@ -361,9 +318,9 @@ pub async fn main() -> Result<(), anyhow::Error> {
 // Could inline https://github.com/atroche/rust-headless-chrome/blob/61ce783806e5d75a03f731330edae6156bb0a2e0/src/types.rs#L78
 // but not that much point in it
 #[derive(Debug)]
-struct ScreenShotCommand {}
+struct PrintCommand {}
 
-impl WebDriverCompatibleCommand for ScreenShotCommand {
+impl WebDriverCompatibleCommand for PrintCommand {
     /// See <https://w3c.github.io/webdriver/#print-page>
     fn endpoint(
         &self,
@@ -391,29 +348,9 @@ mod tests {
     #[tokio::test]
     async fn test_print_pdf() -> Result<(), anyhow::Error> {
         let mut c = fantoccini::ClientBuilder::native();
-        c.capabilities(serde_json::Map::from_iter(
-            [
-                (
-                    "goog:chromeOptions".to_string(),
-                    serde_json::json!({
-                            "args": ["--headless"],
-                    }),
-                ),
-                (
-                    "ms:edgeOptions".to_string(),
-                    serde_json::json!({
-                            "args": ["--headless"],
-                    }),
-                ),
-                (
-                    "moz:firefoxOptions".to_string(),
-                    serde_json::json!({
-                            "args": ["--headless"],
-                    }),
-                ),
-            ]
-            .into_iter(),
-        ));
+        c.capabilities(serde_json::from_str::<Capabilities>(
+            WEB_DRIVER_CAPABILITIES,
+        )?);
         let browser = c
             .connect("http://localhost:4444")
             .await
@@ -422,7 +359,7 @@ mod tests {
         browser
             .goto("https://www.ntnu.no/studier/emner/TDT4120")
             .await?;
-        let data = browser.issue_cmd(ScreenShotCommand {}).await?;
+        let data = browser.issue_cmd(PrintCommand {}).await?;
         let str = data.as_str().unwrap();
         let pdf = base64::decode(str)?;
 

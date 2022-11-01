@@ -1,0 +1,11 @@
+{
+  "goog:chromeOptions": {
+    "args": ["--headless"]
+  },
+  "ms:edgeOptions": {
+    "args": ["--headless"]
+  },
+  "moz:firefoxOptions": {
+    "args": ["--headless"]
+  }
+}
