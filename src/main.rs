@@ -5,7 +5,7 @@ use anyhow::anyhow;
 use chrono::prelude::*;
 use chrono::DateTime;
 use clap::{Arg, Command};
-use fantoccini::wd::{Capabilities, WebDriverCompatibleCommand};
+use fantoccini::wd::Capabilities;
 use http::{Request, Response, StatusCode};
 use hyper::service::service_fn;
 use hyper::{Body, Server};
@@ -27,6 +27,7 @@ use thiserror::Error;
 use tokio::sync::oneshot;
 use tower::make::Shared;
 use url::Url;
+use webdriver::command::{PrintParameters, WebDriverCommand};
 
 const WEB_DRIVER_CAPABILITIES: &str = include_str!("WebDriverCapabilities.json");
 
@@ -69,26 +70,34 @@ async fn parse_request(
     // FIXME: what is happening here
     let url = Url::parse(&format!("http://localhost{redirect_url}")).unwrap();
 
-    let code_pair = url
+    let value = url
         .query_pairs()
-        .find(|pair| {
-            let &(ref key, _) = pair;
-            key == "code"
-        })
+        .find_map(
+            |(key, value)| {
+                if key == "code" {
+                    Some(value)
+                } else {
+                    None
+                }
+            },
+        )
         .ok_or_else(|| anyhow!("Invalid request"))?;
 
-    let (_, value) = code_pair;
     let code = AuthorizationCode::new(value.into_owned());
 
-    let state_pair = url
+    let value = url
         .query_pairs()
-        .find(|pair| {
-            let &(ref key, _) = pair;
-            key == "state"
-        })
+        .find_map(
+            |(key, value)| {
+                if key == "state" {
+                    Some(value)
+                } else {
+                    None
+                }
+            },
+        )
         .ok_or_else(|| anyhow!("Irrelevant request"))?;
 
-    let (_, value) = state_pair;
     let state = CsrfToken::new(value.into_owned());
 
     Ok((
@@ -112,11 +121,13 @@ fn cli() -> clap::Command {
             Arg::new("client_id")
                 .help("OIDC Client ID, can be retrieved from https://dashboard.dataporten.no")
                 .env("FEIDE_CLIENT_ID")
+                .required(true)
         )
         .arg(
             Arg::new("client_secret")
                 .help("OIDC Client Secret, can be retrieved from https://dashboard.dataporten.no")
                 .env("FEIDE_CLIENT_SECRET")
+                .required(true)
         )
         .arg(Arg::new("redirect-port")
             .help("Port of the redirection-URL, which you configured in https://dashboard.dataporten.no")
@@ -298,42 +309,20 @@ pub async fn main() -> Result<(), anyhow::Error> {
                 now.year() - 1
             }
         };
-        let uri = format!(
-            "https://www.ntnu.edu/studies/courses/{emne_kode}/{year}",
-            emne_kode = emne_kode,
-            year = year
-        );
+        let uri = format!("https://www.ntnu.edu/studies/courses/{emne_kode}/{year}",);
 
         browser.goto(&uri).await?;
-        let data = browser.issue_cmd(PrintCommand {}).await?;
+        let data = browser
+            .issue_cmd(WebDriverCommand::Print(PrintParameters::default()))
+            .await?;
         let pdf = base64::decode(data.as_str().unwrap())?;
 
         fs::write(format!("{}/{}.pdf", folder_path, emne_kode), pdf)?;
     }
 
+    browser.close().await?;
     thread_handler.await?;
     Ok(())
-}
-
-// Could inline https://github.com/atroche/rust-headless-chrome/blob/61ce783806e5d75a03f731330edae6156bb0a2e0/src/types.rs#L78
-// but not that much point in it
-#[derive(Debug)]
-struct PrintCommand {}
-
-impl WebDriverCompatibleCommand for PrintCommand {
-    /// See <https://w3c.github.io/webdriver/#print-page>
-    fn endpoint(
-        &self,
-        base_url: &url::Url,
-        session_id: std::option::Option<&str>,
-    ) -> Result<url::Url, url::ParseError> {
-        let base = { base_url.join(&format!("session/{}/", session_id.as_ref().unwrap()))? };
-        base.join("print")
-    }
-    fn method_and_body(&self, _request_url: &url::Url) -> (http::Method, Option<String>) {
-        // needs to be empty json object, not None
-        (http::Method::POST, Some("{}".to_string()))
-    }
 }
 
 #[cfg(test)]
@@ -359,7 +348,9 @@ mod tests {
         browser
             .goto("https://www.ntnu.no/studier/emner/TDT4120")
             .await?;
-        let data = browser.issue_cmd(PrintCommand {}).await?;
+        let data = browser
+            .issue_cmd(WebDriverCommand::Print(PrintParameters::default()))
+            .await?;
         let str = data.as_str().unwrap();
         let pdf = base64::decode(str)?;
 

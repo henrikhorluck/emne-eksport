@@ -22,6 +22,11 @@ http = "0.2"
 tower = { version = "0.4", features = ["make"]}
 thiserror = "1.0"
 chrono = { version = "0.4", features = ["serde"] }
-fantoccini = "0.19"
+fantoccini = "0.20.0-rc.2"
 base64 = "0.13"
+# must be equal to fantoccini's
+webdriver = "0.46.0"
+
+[patch.crates-io]
+fantoccini = { git = "https://github.com/henrikhorluck/fantoccini", branch = "feat/print" }
 
