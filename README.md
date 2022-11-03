@@ -10,15 +10,15 @@ Du må ha API tilgang på http://dashboard.dataporten.no/, som var tilgjengelig 
 > ./emne-eksport --help
 Eksporter emnebeskrivelser fra utdanning ved NTNU
 
-Usage: emne-eksport [OPTIONS] -d <destination> [client_id] [client_secret]
+Usage: emne-eksport [OPTIONS] -d <DESTINATION> <CLIENT_ID> <CLIENT_SECRET>
 
 Arguments:
-  [client_id]      OIDC Client ID, can be retrieved from https://dashboard.dataporten.no [env: FEIDE_CLIENT_ID=]
-  [client_secret]  OIDC Client Secret, can be retrieved from https://dashboard.dataporten.no [env: FEIDE_CLIENT_SECRET=]
+  <CLIENT_ID>      OIDC Client ID, can be retrieved from https://dashboard.dataporten.no [env: FEIDE_CLIENT_ID=]
+  <CLIENT_SECRET>  OIDC Client Secret, can be retrieved from https://dashboard.dataporten.no [env: FEIDE_CLIENT_SECRET=]
 
 Options:
-  -d <destination>        Name of the folder to put the exported PDFs
-  -p <redirect-port>      Port of the redirection-URL, which you configured in https://dashboard.dataporten.no [default: 16453]
+  -d <DESTINATION>        Name of the folder to put the exported PDFs
+  -p <REDIRECT_PORT>      Port of the redirection-URL, which you configured in https://dashboard.dataporten.no [default: 16453]
   -h, --help              Print help information
   -V, --version           Print version information
 ```

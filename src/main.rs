@@ -4,7 +4,7 @@
 use anyhow::anyhow;
 use chrono::prelude::*;
 use chrono::DateTime;
-use clap::{value_parser, Arg, Command};
+use clap::Parser;
 use fantoccini::wd::Capabilities;
 
 use log::debug;
@@ -15,7 +15,9 @@ use openidconnect::{
     IssuerUrl, Nonce, OAuth2TokenResponse, PkceCodeChallenge, RedirectUrl, Scope, TokenResponse,
 };
 use serde::Deserialize;
+use std::convert::Infallible;
 use std::fs;
+use std::path::PathBuf;
 use std::time::Duration;
 use tokio::sync::mpsc::Receiver;
 use warp::Filter;
@@ -34,6 +36,30 @@ struct Emne {
     membership: Membership,
     #[serde(rename = "displayName")]
     display_name: String,
+}
+
+impl Emne {
+    fn year_taken(&self) -> i32 {
+        let now = Utc::now();
+        // not_after is set to ~14. August if it is spring, and 12. December if autumn
+        match self.membership.not_after {
+            Some(y) if y.month() > Month::September as u32 => y.year(),
+            Some(y) => y.year() - 1,
+            None if now.month() > Month::August as u32 => now.year(),
+            None => now.year() - 1,
+        }
+    }
+
+    fn emne_code(&self) -> &str {
+        self.id.split(':').nth(5).unwrap()
+    }
+
+    fn uri(&self) -> String {
+        // TODO: support 1. localization, 2. different universities by reading from the id
+        let emne_code = self.emne_code();
+        let year_taken = self.year_taken();
+        format!("https://www.ntnu.edu/studies/courses/{emne_code}/{year_taken}")
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -82,50 +108,37 @@ struct OidcQuery {
     state: CsrfToken,
 }
 
-fn cli() -> clap::Command {
-    Command::new("emne-eksport")
-        .version("0.1")
-        .about("Eksporter emnebeskrivelser fra utdanning ved NTNU")
-        .arg(
-            Arg::new("destination")
-                .help("Name of the folder to put the exported PDFs")
-                .short('d')
-                .required(true),
-        )
-        .arg(
-            Arg::new("client_id")
-                .help("OIDC Client ID, can be retrieved from https://dashboard.dataporten.no")
-                .env("FEIDE_CLIENT_ID")
-                .required(true)
-        )
-        .arg(
-            Arg::new("client_secret")
-                .help("OIDC Client Secret, can be retrieved from https://dashboard.dataporten.no")
-                .env("FEIDE_CLIENT_SECRET")
-                .required(true)
-        )
-        .arg(Arg::new("redirect-port")
-            .help("Port of the redirection-URL, which you configured in https://dashboard.dataporten.no")
-            .default_value("16453")
-            .value_parser(value_parser!(u16))
-            .short('p')
-        )
+#[derive(Parser, Debug)]
+#[command(version)]
+/// Eksporter emnebeskrivelser fra utdanning ved NTNU
+struct Cli {
+    /// Name of the folder to put the exported PDFs
+    #[arg(short = 'd')]
+    destination: PathBuf,
+
+    /// OIDC Client ID, can be retrieved from https://dashboard.dataporten.no
+    #[arg(env="FEIDE_CLIENT_ID", value_parser=client_id_parser)]
+    client_id: ClientId,
+    /// OIDC Client Secret, can be retrieved from https://dashboard.dataporten.no
+    #[arg(env="FEIDE_CLIENT_SECRET", value_parser=client_secret_parser)]
+    client_secret: ClientSecret,
+    /// Port of the redirection-URL, which you configured in https://dashboard.dataporten.no
+    #[arg(short = 'p', default_value_t = 16453)]
+    redirect_port: u16,
+}
+
+fn client_id_parser(s: &str) -> Result<ClientId, Infallible> {
+    Ok(ClientId::new(s.to_string()))
+}
+
+fn client_secret_parser(s: &str) -> Result<ClientSecret, Infallible> {
+    Ok(ClientSecret::new(s.to_string()))
 }
 
 #[tokio::main]
 pub async fn main() -> Result<(), anyhow::Error> {
     env_logger::init();
-    let config = cli().get_matches();
-    let folder_path = config.get_one::<String>("destination").unwrap();
-
-    let feide_client_id = ClientId::new(config.get_one::<String>("client_id").unwrap().to_string());
-    let feide_client_secret = ClientSecret::new(
-        config
-            .get_one::<String>("client_secret")
-            .unwrap()
-            .to_string(),
-    );
-    let port: u16 = *config.get_one::<u16>("redirect-port").unwrap();
+    let config = Cli::parse();
 
     let provider_metadata = CoreProviderMetadata::discover_async(
         IssuerUrl::new("https://auth.dataporten.no".to_string())?,
@@ -135,10 +148,13 @@ pub async fn main() -> Result<(), anyhow::Error> {
 
     let client = CoreClient::from_provider_metadata(
         provider_metadata,
-        feide_client_id,
-        Some(feide_client_secret),
+        config.client_id,
+        Some(config.client_secret),
     )
-    .set_redirect_uri(RedirectUrl::new(format!("http://localhost:{}", port))?);
+    .set_redirect_uri(RedirectUrl::new(format!(
+        "http://localhost:{}",
+        config.redirect_port
+    ))?);
 
     let (pkce_challenge, pkce_verifier) = PkceCodeChallenge::new_random_sha256();
     let (authorize_url, csrf_token, nonce) = client
@@ -159,7 +175,7 @@ pub async fn main() -> Result<(), anyhow::Error> {
     let (mut q_rx, mut shutdown_rx, route) = setup_server();
 
     let (_addr, server) = warp::serve(route).bind_with_graceful_shutdown(
-        ([127, 0, 0, 1], port),
+        ([127, 0, 0, 1], config.redirect_port),
         // Prepare some signal for when the server should start shutting down...
         async move {
             shutdown_rx
@@ -176,8 +192,8 @@ pub async fn main() -> Result<(), anyhow::Error> {
         .await
         .expect("Didn't log in in time")
         .expect("Didn't log in in time");
-    let code = q.code;
-    let state = q.state;
+    let (code, state) = (q.code, q.state);
+
     debug!("Feide returned the following code:\n{}\n", code.secret());
     debug!(
         "Feide returned the following state:\n{} (expected `{}`)\n",
@@ -228,35 +244,19 @@ pub async fn main() -> Result<(), anyhow::Error> {
         .await
         .expect("failed to connect to WebDriver");
 
-    fs::create_dir(folder_path)?;
+    fs::create_dir(&config.destination)?;
 
     for emne in emner.iter().filter(|e| e.emne_type == "fc:fs:emne") {
-        let emne_kode = emne.id.split(':').nth(5).unwrap();
-        let year = if let Some(not_after) = emne.membership.not_after {
-            // not_after is set to ~14. August if it is spring, and 12. December if autumn
-            if not_after.month() > Month::September as u32 {
-                not_after.year()
-            } else {
-                not_after.year() - 1
-            }
-        } else {
-            // current year
-            let now = Utc::now();
-            if now.month() > Month::August as u32 {
-                now.year()
-            } else {
-                now.year() - 1
-            }
-        };
-        let uri = format!("https://www.ntnu.edu/studies/courses/{emne_kode}/{year}",);
-
-        browser.goto(&uri).await?;
+        browser.goto(&emne.uri()).await?;
         let data = browser
             .issue_cmd(WebDriverCommand::Print(PrintParameters::default()))
             .await?;
         let pdf = base64::decode(data.as_str().unwrap())?;
 
-        fs::write(format!("{}/{}.pdf", folder_path, emne_kode), pdf)?;
+        fs::write(
+            config.destination.join(format!("{}.pdf", emne.emne_code())),
+            pdf,
+        )?;
     }
 
     browser.close().await?;
@@ -266,13 +266,14 @@ pub async fn main() -> Result<(), anyhow::Error> {
 
 #[cfg(test)]
 mod tests {
+    use clap::CommandFactory;
     use tokio::time::timeout;
 
     use super::*;
 
     #[test]
     fn verify_cli() {
-        cli().debug_assert();
+        Cli::command().debug_assert();
     }
 
     #[tokio::test]
