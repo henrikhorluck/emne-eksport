@@ -4,11 +4,8 @@
 use anyhow::anyhow;
 use chrono::prelude::*;
 use chrono::DateTime;
-use clap::{Arg, Command};
+use clap::{value_parser, Arg, Command};
 use fantoccini::wd::Capabilities;
-use http::{Request, Response, StatusCode};
-use hyper::service::service_fn;
-use hyper::{Body, Server};
 
 use log::debug;
 use openidconnect::core::{CoreClient, CoreProviderMetadata, CoreResponseType};
@@ -18,18 +15,15 @@ use openidconnect::{
     IssuerUrl, Nonce, OAuth2TokenResponse, PkceCodeChallenge, RedirectUrl, Scope, TokenResponse,
 };
 use serde::Deserialize;
-use std::convert::Infallible;
 use std::fs;
-use std::sync::mpsc;
-use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use thiserror::Error;
-use tokio::sync::oneshot;
-use tower::make::Shared;
-use url::Url;
+use tokio::sync::mpsc::Receiver;
+use warp::Filter;
+use warp::Rejection;
 use webdriver::command::{PrintParameters, WebDriverCommand};
 
 const WEB_DRIVER_CAPABILITIES: &str = include_str!("WebDriverCapabilities.json");
+const RETURN_MESSAGE: &str = "Go back to your terminal :)";
 
 #[derive(Debug, Deserialize)]
 struct Emne {
@@ -53,58 +47,39 @@ struct Membership {
     subject_relations: Option<String>,
 }
 
-#[derive(Error, Debug)]
-pub enum ParseError {
-    #[error("Invalid request")]
-    Invalid(#[from] anyhow::Error),
-    #[error("Not found")]
-    NotFound(),
+fn setup_server() -> (
+    Receiver<OidcQuery>,
+    Receiver<()>,
+    warp::filters::BoxedFilter<(String,)>,
+) {
+    let (q_tx, q_rx) = tokio::sync::mpsc::channel::<OidcQuery>(1);
+    let (shutdown_tx, shutdown_rx) = tokio::sync::mpsc::channel::<()>(1);
+
+    let route = warp::path::end()
+        .and(warp::query::<OidcQuery>())
+        .and_then(move |query: OidcQuery| {
+            let q_tx = q_tx.clone();
+            let shutdown_tx = shutdown_tx.clone();
+
+            async move {
+                q_tx.send(query)
+                    .await
+                    .expect("unable to forward data from server");
+                shutdown_tx
+                    .send(())
+                    .await
+                    .expect("unable to shutdown server");
+                Ok::<String, Rejection>(RETURN_MESSAGE.into())
+            }
+        })
+        .boxed();
+    (q_rx, shutdown_rx, route)
 }
-async fn parse_request(
-    req: Request<Body>,
-) -> Result<(Response<Body>, AuthorizationCode, CsrfToken), ParseError> {
-    let redirect_url = req.uri();
-    if redirect_url.path() != "/" {
-        return Err(ParseError::Invalid(anyhow!("Not Found")));
-    }
-    // FIXME: what is happening here
-    let url = Url::parse(&format!("http://localhost{redirect_url}")).unwrap();
 
-    let value = url
-        .query_pairs()
-        .find_map(
-            |(key, value)| {
-                if key == "code" {
-                    Some(value)
-                } else {
-                    None
-                }
-            },
-        )
-        .ok_or_else(|| anyhow!("Invalid request"))?;
-
-    let code = AuthorizationCode::new(value.into_owned());
-
-    let value = url
-        .query_pairs()
-        .find_map(
-            |(key, value)| {
-                if key == "state" {
-                    Some(value)
-                } else {
-                    None
-                }
-            },
-        )
-        .ok_or_else(|| anyhow!("Irrelevant request"))?;
-
-    let state = CsrfToken::new(value.into_owned());
-
-    Ok((
-        Response::new("Go back to your terminal :)".into()),
-        code,
-        state,
-    ))
+#[derive(Deserialize, Debug)]
+struct OidcQuery {
+    code: AuthorizationCode,
+    state: CsrfToken,
 }
 
 fn cli() -> clap::Command {
@@ -132,6 +107,7 @@ fn cli() -> clap::Command {
         .arg(Arg::new("redirect-port")
             .help("Port of the redirection-URL, which you configured in https://dashboard.dataporten.no")
             .default_value("16453")
+            .value_parser(value_parser!(u16))
             .short('p')
         )
 }
@@ -165,7 +141,7 @@ pub async fn main() -> Result<(), anyhow::Error> {
     .set_redirect_uri(RedirectUrl::new(format!("http://localhost:{}", port))?);
 
     let (pkce_challenge, pkce_verifier) = PkceCodeChallenge::new_random_sha256();
-    let (authorize_url, csrf_state, nonce) = client
+    let (authorize_url, csrf_token, nonce) = client
         .authorize_url(
             AuthenticationFlow::<CoreResponseType>::AuthorizationCode,
             CsrfToken::new_random,
@@ -180,77 +156,38 @@ pub async fn main() -> Result<(), anyhow::Error> {
 
     println!("Open this URL in your browser:\n{}\n", authorize_url);
 
-    // A very naive implementation of the redirect server.
-    // TODO: this is quite ugly
-    let (code_tx, code_rx) = mpsc::sync_channel::<AuthorizationCode>(1);
-    let (state_tx, state_rx) = mpsc::sync_channel::<CsrfToken>(1);
-    let (tx, rx) = oneshot::channel::<()>();
+    let (mut q_rx, mut shutdown_rx, route) = setup_server();
 
-    let (tx_2, rx_2) = oneshot::channel::<oneshot::Sender<()>>();
-    tx_2.send(tx).unwrap();
-    // yes, I send the oneshot through a oneshot, since oneshot::Sender::send(self) consumes self,
-    // and this was genuinely one of the easier ways to get a Owned reference into the request
-    // handler
-    let rx_mtx = Arc::new(Mutex::new(rx_2));
-    let make_servce = Shared::new(service_fn(move |req| {
-        let code_tx = code_tx.clone();
-        let state_tx = state_tx.clone();
-        let rx_mtx = rx_mtx.clone();
-
-        async move {
-            let res: Result<(Response<Body>, AuthorizationCode, CsrfToken), ParseError> =
-                parse_request(req).await;
-
-            let ok: Result<Response<Body>, Infallible> = Ok(match res {
-                Ok(res) => {
-                    code_tx.send(res.1).unwrap();
-                    state_tx.send(res.2).unwrap();
-                    let tx = rx_mtx.lock().unwrap().try_recv().unwrap();
-                    let _ = tx.send(());
-                    res.0
-                }
-                Err(e) => match e {
-                    ParseError::Invalid(_) => Response::builder()
-                        .status(StatusCode::BAD_REQUEST)
-                        .body(Body::empty())
-                        .unwrap(),
-                    ParseError::NotFound() => Response::builder()
-                        .status(StatusCode::NOT_FOUND)
-                        .body(Body::empty())
-                        .unwrap(),
-                },
-            });
-            ok
-        }
-    }));
-    let thread_handler = tokio::spawn(async move {
-        let server = Server::bind(&([127, 0, 0, 1], port).into()).serve(make_servce);
+    let (_addr, server) = warp::serve(route).bind_with_graceful_shutdown(
+        ([127, 0, 0, 1], port),
         // Prepare some signal for when the server should start shutting down...
-        let graceful = server.with_graceful_shutdown(async {
-            rx.await.ok();
-        });
+        async move {
+            shutdown_rx
+                .recv()
+                .await
+                .expect("failed to receive shutdown");
+        },
+    );
 
-        // Await the `server` receiving the signal...
-        if let Err(e) = graceful.await {
-            eprintln!("server error: {}", e);
-        }
-    });
+    let thread_handle = tokio::task::spawn(server);
 
     // And later, trigger the signal by calling `tx.send(())`.
-    let code = code_rx
-        .recv_timeout(Duration::from_secs(60))
+    let q = tokio::time::timeout(Duration::from_secs(60), q_rx.recv())
+        .await
+        .expect("Didn't log in in time")
         .expect("Didn't log in in time");
-    let state = state_rx.recv().unwrap();
+    let code = q.code;
+    let state = q.state;
     debug!("Feide returned the following code:\n{}\n", code.secret());
     debug!(
         "Feide returned the following state:\n{} (expected `{}`)\n",
         state.secret(),
-        csrf_state.secret()
+        csrf_token.secret()
     );
 
     // Exchange the code with a token.
     let token_response = client
-        .exchange_code(code.clone())
+        .exchange_code(code)
         .set_pkce_verifier(pkce_verifier)
         .request_async(async_http_client)
         .await?;
@@ -258,6 +195,8 @@ pub async fn main() -> Result<(), anyhow::Error> {
     let id_token = token_response
         .id_token()
         .ok_or_else(|| anyhow!("Server did not return an ID token"))?;
+
+    // TODO: this step failed?
     let claims = id_token.claims(&client.id_token_verifier(), &nonce)?;
     debug!("Feide returned ID token: {:?}", id_token);
     // Verify the access token hash to ensure that the access token hasn't been substituted for
@@ -321,17 +260,47 @@ pub async fn main() -> Result<(), anyhow::Error> {
     }
 
     browser.close().await?;
-    thread_handler.await?;
+    thread_handle.await?;
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
+    use tokio::time::timeout;
+
     use super::*;
 
     #[test]
     fn verify_cli() {
         cli().debug_assert();
+    }
+
+    #[tokio::test]
+    async fn test_filter() {
+        let (mut q_rx, mut shutdown_rx, filter) = setup_server();
+
+        let code = "bc8ebda9625e4067b6633f9edce4af46";
+        let state = "eLEMZJlCgDXh_JV02mi8lw";
+
+        let return_message = warp::test::request()
+            .path(&format!("/?code={code}&state={state}").to_string())
+            .filter(&filter)
+            .await
+            .unwrap();
+
+        assert_eq!(return_message, RETURN_MESSAGE);
+
+        let q = timeout(Duration::from_secs(1), q_rx.recv())
+            .await
+            .expect("failed to send query params")
+            .expect("failed to send query params");
+
+        assert_eq!(q.code.secret(), code);
+        assert_eq!(q.state.secret(), state);
+        timeout(Duration::from_secs(1), shutdown_rx.recv())
+            .await
+            .expect("failed to send shutdown signal")
+            .expect("failed send shutdown signal");
     }
 
     #[tokio::test]
