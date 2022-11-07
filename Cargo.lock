@@ -290,7 +290,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "warp",
- "webdriver",
+ "webdriver 0.47.0",
 ]
 
 [[package]]
@@ -334,7 +334,7 @@ dependencies = [
  "time 0.3.16",
  "tokio",
  "url",
- "webdriver",
+ "webdriver 0.46.0",
 ]
 
 [[package]]
@@ -1932,6 +1932,25 @@ name = "webdriver"
 version = "0.46.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9973cb72c8587d5ad5efdb91e663d36177dc37725e6c90ca86c626b0cc45c93f"
+dependencies = [
+ "base64",
+ "bytes",
+ "cookie",
+ "http",
+ "log",
+ "serde",
+ "serde_derive",
+ "serde_json",
+ "time 0.3.16",
+ "unicode-segmentation",
+ "url",
+]
+
+[[package]]
+name = "webdriver"
+version = "0.47.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "aac1bf6257c9610cbf46e68a515a7f15580e324e03983852e902edb143a8469e"
 dependencies = [
  "base64",
  "bytes",

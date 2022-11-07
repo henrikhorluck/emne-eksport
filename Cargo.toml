@@ -20,6 +20,6 @@ chrono = { version = "0.4", features = ["serde"] }
 fantoccini = "0.20.0-rc.3"
 base64 = "0.13"
 # must be equal to fantoccini's
-webdriver = "0.46.0"
+webdriver = "0.47.0"
 warp = "0.3.3"
 
